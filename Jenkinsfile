@@ -141,7 +141,7 @@ pipeline {
                         echo '=== SERVICES ==='
                         kubectl get svc -n devops
 
-                        echo '=== URL D\'ACCÈS ==='
+                        echo '=== URL ACCES ==='
                         minikube service spring-service -n devops --url
                     """
                 }
