@@ -142,7 +142,7 @@ pipeline {
                         kubectl get svc -n devops
 
                         echo '=== URL ACCES ==='
-                        minikube service spring-service -n devops --url
+                        echo 'Application accessible sur: http://\$(minikube ip):30080'
                     """
                 }
                 echo 'Vérification terminée'
