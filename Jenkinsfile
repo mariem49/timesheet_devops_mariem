@@ -109,7 +109,7 @@ pipeline {
                     sh """
                         kubectl apply -f k8s/mysql-deployment.yaml
                         echo 'Attente du démarrage de MySQL...'
-                        kubectl wait --for=condition=ready pod -l app=mysql -n devops --timeout=300s
+                        kubectl wait --for=condition=ready pod -l app=mysql -n devops --timeout=600s
                     """
                 }
                 echo 'MySQL déployé avec succès'
