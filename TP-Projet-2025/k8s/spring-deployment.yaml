@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
         - name: spring-app
-          image: mariem49/timesheet-app:latest  # CHANGE TON USERNAME DOCKER HUB ICI
+          image: mariem49/timesheet-app:latest
           ports:
             - containerPort: 8080
           env:
