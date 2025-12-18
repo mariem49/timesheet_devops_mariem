@@ -122,10 +122,11 @@ pipeline {
             }
         }
 
-        stage('7. Vérification du déploiement') {
+        stage('7. Vérification & Notification') {
             steps {
-                echo 'Vérification du déploiement...'
+                echo '🔍 Vérification du déploiement...'
                 script {
+                    // Vérification du déploiement
                     sh """
                         echo '=== PODS ==='
                         kubectl get pods -n devops
@@ -134,10 +135,66 @@ pipeline {
                         kubectl get svc -n devops
 
                         echo '=== URL ACCES ==='
-                        echo 'Application accessible sur: http://\$(minikube ip):30080'
+                        KUBE_IP=\$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+                        echo "Application accessible sur: http://\${KUBE_IP}:30080"
                     """
+
+                    echo '✅ Vérification terminée'
+
+                    // Récupérer les informations de déploiement
+                    def deploymentStatus = sh(
+                        script: 'kubectl get pods -n devops | grep -c Running || echo "0"',
+                        returnStdout: true
+                    ).trim()
+
+                    def kubeIP = sh(
+                        script: 'kubectl get nodes -o jsonpath=\'{.items[0].status.addresses[?(@.type=="InternalIP")].address}\'',
+                        returnStdout: true
+                    ).trim()
+
+                    // Envoi de l'email de succès
+                    echo '📧 Envoi de l\'email de notification...'
+                    emailext(
+                        subject: "✅ Déploiement Réussi - ${JOB_NAME} #${BUILD_NUMBER}",
+                        body: """
+                            <html>
+                            <body style="font-family: Arial, sans-serif;">
+                                <h2 style="color: #28a745;">🎉 Déploiement Kubernetes Réussi!</h2>
+
+                                <h3>📋 Détails du Build:</h3>
+                                <ul>
+                                    <li><strong>Projet:</strong> ${JOB_NAME}</li>
+                                    <li><strong>Build Number:</strong> #${BUILD_NUMBER}</li>
+                                    <li><strong>Image Docker:</strong> ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}</li>
+                                    <li><strong>Statut:</strong> <span style="color: #28a745; font-weight: bold;">SUCCESS ✅</span></li>
+                                </ul>
+
+                                <h3>☸️ Déploiement Kubernetes:</h3>
+                                <ul>
+                                    <li><strong>Namespace:</strong> devops</li>
+                                    <li><strong>Pods en cours d'exécution:</strong> ${deploymentStatus}</li>
+                                    <li><strong>URL d'accès:</strong> <a href="http://${kubeIP}:30080" style="color: #007bff;">http://${kubeIP}:30080</a></li>
+                                </ul>
+
+                                <h3>🔍 Analyse SonarQube:</h3>
+                                <p><a href="${SONAR_HOST_URL}/dashboard?id=timesheet-devops-mariem" style="color: #007bff;">📊 Voir les résultats SonarQube</a></p>
+
+                                <h3>🐳 Image Docker Hub:</h3>
+                                <p><a href="https://hub.docker.com/r/${DOCKER_IMAGE_NAME}" style="color: #007bff;">🔗 Voir sur Docker Hub</a></p>
+
+                                <hr style="border: 1px solid #e9ecef;">
+                                <p style="color: #6c757d; font-size: 12px;">
+                                    ⏰ Build terminé à: ${new Date()}<br>
+                                    📝 <a href="${BUILD_URL}">Voir les logs complets</a>
+                                </p>
+                            </body>
+                            </html>
+                        """,
+                        to: 'pgtxsi@gmail.com',
+                        mimeType: 'text/html'
+                    )
+                    echo '✅ Email de notification envoyé avec succès!'
                 }
-                echo 'Vérification terminée'
             }
         }
     }
@@ -150,6 +207,33 @@ pipeline {
         }
         failure {
             echo '❌ Le pipeline a échoué. Vérifiez les logs ci-dessus.'
+            emailext(
+                subject: "❌ Échec du Déploiement - Build #${BUILD_NUMBER}",
+                body: """
+                    <html>
+                    <body style="font-family: Arial, sans-serif;">
+                        <h2 style="color: #dc3545;">❌ Échec du Déploiement!</h2>
+
+                        <h3>Détails du Build:</h3>
+                        <ul>
+                            <li><strong>Projet:</strong> ${JOB_NAME}</li>
+                            <li><strong>Build Number:</strong> #${BUILD_NUMBER}</li>
+                            <li><strong>Statut:</strong> <span style="color: #dc3545;">FAILURE</span></li>
+                        </ul>
+
+                        <p><strong>Action requise:</strong> Veuillez vérifier les logs pour identifier le problème.</p>
+
+                        <hr>
+                        <p style="color: #6c757d; font-size: 12px;">
+                            Build échoué à: ${new Date()}<br>
+                            <a href="${BUILD_URL}console">Voir les logs complets</a>
+                        </p>
+                    </body>
+                    </html>
+                """,
+                to: 'pgtxsi@gmail.com',
+                mimeType: 'text/html'
+            )
         }
         always {
             echo 'Nettoyage des images Docker locales...'
