@@ -96,25 +96,29 @@ pipeline {
             }
         }
 
-        stage('6. Kubernetes Deploy') {
+        stage('6. Deploy MySQL & Spring Boot on K8s') {
             steps {
-                echo 'Déploiement sur le cluster Kubernetes...'
+                echo '📦 Déploiement MySQL & Spring Boot sur Kubernetes...'
                 script {
                     // Déploiement MySQL
+                    echo '🗄️ Déploiement de MySQL...'
                     sh """
                         kubectl apply -f k8s/mysql-deployment.yaml
                         echo 'Attente du démarrage de MySQL...'
                         kubectl wait --for=condition=ready pod -l app=mysql -n devops --timeout=600s
                     """
+                    echo '✅ MySQL déployé avec succès'
 
                     // Déploiement Spring Boot
+                    echo '🚀 Déploiement de Spring Boot...'
                     sh """
                         kubectl apply -f k8s/spring-deployment.yaml
                         kubectl set image deployment/spring-app spring-app=${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} -n devops
                         kubectl rollout status deployment/spring-app -n devops --timeout=300s
                     """
+                    echo '✅ Spring Boot déployé avec succès'
                 }
-                echo 'Déploiement Kubernetes terminé avec succès'
+                echo '🎉 Déploiement Kubernetes terminé avec succès'
             }
         }
 
