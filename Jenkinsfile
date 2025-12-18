@@ -66,71 +66,59 @@ pipeline {
             }
         }
 
-        stage('5. Construction de l\'image Docker') {
+        stage('5. Docker Build & Push') {
             steps {
-                echo 'Construction de l\'image Docker...'
+                echo 'Construction et push de l\'image Docker...'
                 dir("${PROJECT_DIR}") {
                     script {
+                        // Construction de l'image
                         sh """
                             docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} .
                             docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest
                         """
+
+                        // Push sur Docker Hub
+                        withCredentials([usernamePassword(
+                            credentialsId: "${DOCKER_HUB_CREDENTIALS}",
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )]) {
+                            sh """
+                                echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
+                                docker push ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
+                                docker push ${DOCKER_IMAGE_NAME}:latest
+                                docker logout
+                            """
+                        }
                     }
                 }
-                echo 'Image Docker construite avec succès'
+                echo 'Image Docker construite et poussée sur Docker Hub avec succès'
             }
         }
 
-        stage('6. Push de l\'image sur Docker Hub') {
+        stage('6. Kubernetes Deploy') {
             steps {
-                echo 'Connexion à Docker Hub et push de l\'image...'
+                echo 'Déploiement sur le cluster Kubernetes...'
                 script {
-                    withCredentials([usernamePassword(
-                        credentialsId: "${DOCKER_HUB_CREDENTIALS}",
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )]) {
-                        sh """
-                            echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
-                            docker push ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
-                            docker push ${DOCKER_IMAGE_NAME}:latest
-                            docker logout
-                        """
-                    }
-                }
-                echo 'Image Docker poussée sur Docker Hub avec succès'
-            }
-        }
-
-        stage('7. Déploiement MySQL sur Kubernetes') {
-            steps {
-                echo 'Déploiement de MySQL sur le cluster Kubernetes...'
-                script {
+                    // Déploiement MySQL
                     sh """
                         kubectl apply -f k8s/mysql-deployment.yaml
                         echo 'Attente du démarrage de MySQL...'
                         kubectl wait --for=condition=ready pod -l app=mysql -n devops --timeout=600s
                     """
-                }
-                echo 'MySQL déployé avec succès'
-            }
-        }
 
-        stage('8. Déploiement Spring Boot sur Kubernetes') {
-            steps {
-                echo 'Déploiement de l\'application Spring Boot sur Kubernetes...'
-                script {
+                    // Déploiement Spring Boot
                     sh """
                         kubectl apply -f k8s/spring-deployment.yaml
                         kubectl set image deployment/spring-app spring-app=${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} -n devops
                         kubectl rollout status deployment/spring-app -n devops --timeout=300s
                     """
                 }
-                echo 'Application Spring Boot déployée avec succès'
+                echo 'Déploiement Kubernetes terminé avec succès'
             }
         }
 
-        stage('9. Vérification du déploiement') {
+        stage('7. Vérification du déploiement') {
             steps {
                 echo 'Vérification du déploiement...'
                 script {
