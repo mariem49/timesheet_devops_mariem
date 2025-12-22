@@ -1,0 +1,72 @@
+# 1. ConfigMap pour la configuration de la base de données
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spring-config
+  namespace: devops
+data:
+  DB_URL: "jdbc:mysql://mysql-service:3306/timesheet?useSSL=false&allowPublicKeyRetrieval=true"
+---
+# 2. Secret pour les credentials de la base de données
+apiVersion: v1
+kind: Secret
+metadata:
+  name: spring-secret
+  namespace: devops
+type: Opaque
+data:
+  DB_USERNAME: cm9vdA==  # root en base64
+  DB_PASSWORD: cm9vdA==  # root en base64
+---
+# 3. Deployment Spring Boot
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spring-app
+  namespace: devops
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spring-app
+  template:
+    metadata:
+      labels:
+        app: spring-app
+    spec:
+      containers:
+        - name: spring-app
+          image: mariem49/timesheet-app:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: spring-config
+                  key: DB_URL
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: spring-secret
+                  key: DB_USERNAME
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: spring-secret
+                  key: DB_PASSWORD
+---
+# 4. Service Spring Boot (NodePort)
+apiVersion: v1
+kind: Service
+metadata:
+  name: spring-service
+  namespace: devops
+spec:
+  selector:
+    app: spring-app
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+  type: NodePort
