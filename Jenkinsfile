@@ -12,6 +12,9 @@ pipeline {
         DOCKER_HUB_CREDENTIALS = 'dockerhub-credentials'
         DOCKER_IMAGE_NAME = 'mariem49/timesheet-app'
         DOCKER_IMAGE_TAG = "${BUILD_NUMBER}"
+        
+        // Timeout configuration
+        DOCKER_LOGIN_TIMEOUT = '300'  // 5 minutes
     }
 
     stages {
@@ -62,7 +65,6 @@ pipeline {
                 dir("${PROJECT_DIR}") {
                     sh 'mvn package -DskipTests'
 
-                    // === Snapshot & Archive ===
                     echo '💾 Archivage du JAR généré...'
                     archiveArtifacts artifacts: 'target/*.jar',
                                      fingerprint: true,
@@ -79,27 +81,41 @@ pipeline {
                 dir("${PROJECT_DIR}") {
                     script {
                         // Construction de l'image
+                        echo '🐳 Construction de l\'image Docker...'
                         sh """
                             docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} .
                             docker tag ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest
                         """
+                        echo '✅ Image Docker construite avec succès'
 
-                        // Push sur Docker Hub
+                        // Push sur Docker Hub avec retry
+                        echo '📤 Push de l\'image sur Docker Hub...'
                         withCredentials([usernamePassword(
                             credentialsId: "${DOCKER_HUB_CREDENTIALS}",
                             usernameVariable: 'DOCKER_USER',
                             passwordVariable: 'DOCKER_PASS'
                         )]) {
-                            sh """
-                                echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
-                                docker push ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
-                                docker push ${DOCKER_IMAGE_NAME}:latest
-                                docker logout
-                            """
+                            retry(3) {
+                                timeout(time: 10, unit: 'MINUTES') {
+                                    sh """
+                                        echo "Tentative de connexion à Docker Hub..."
+                                        echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
+                                        
+                                        echo "Push de l'image avec tag ${DOCKER_IMAGE_TAG}..."
+                                        docker push ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}
+                                        
+                                        echo "Push de l'image avec tag latest..."
+                                        docker push ${DOCKER_IMAGE_NAME}:latest
+                                        
+                                        docker logout
+                                        echo "✅ Push terminé avec succès"
+                                    """
+                                }
+                            }
                         }
                     }
                 }
-                echo 'Image Docker construite et poussée sur Docker Hub avec succès'
+                echo '✅ Image Docker construite et poussée sur Docker Hub avec succès'
             }
         }
 
@@ -129,7 +145,7 @@ pipeline {
             }
         }
 
-        stage('7. Vérification & Notification email') {
+        stage('7. Vérification & Notification') {
             steps {
                 echo '🔍 Vérification du déploiement...'
                 script {
@@ -159,48 +175,55 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    // Envoi de l'email de succès
-                    echo '📧 Envoi de l\'email de notification...'
-                    emailext(
-                        subject: "✅ Déploiement Réussi - ${JOB_NAME} #${BUILD_NUMBER}",
-                        body: """
-                            <html>
-                            <body style="font-family: Arial, sans-serif;">
-                                <h2 style="color: #28a745;">🎉 Déploiement Kubernetes Réussi!</h2>
+                    // Tentative d'envoi de l'email de succès (non bloquant)
+                    try {
+                        echo '📧 Tentative d\'envoi de l\'email de notification...'
+                        timeout(time: 2, unit: 'MINUTES') {
+                            emailext(
+                                subject: "✅ Déploiement Réussi - ${JOB_NAME} #${BUILD_NUMBER}",
+                                body: """
+                                    <html>
+                                    <body style="font-family: Arial, sans-serif;">
+                                        <h2 style="color: #28a745;">🎉 Déploiement Kubernetes Réussi!</h2>
 
-                                <h3>📋 Détails du Build:</h3>
-                                <ul>
-                                    <li><strong>Projet:</strong> ${JOB_NAME}</li>
-                                    <li><strong>Build Number:</strong> #${BUILD_NUMBER}</li>
-                                    <li><strong>Image Docker:</strong> ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}</li>
-                                    <li><strong>Statut:</strong> <span style="color: #28a745; font-weight: bold;">SUCCESS ✅</span></li>
-                                </ul>
+                                        <h3>📋 Détails du Build:</h3>
+                                        <ul>
+                                            <li><strong>Projet:</strong> ${JOB_NAME}</li>
+                                            <li><strong>Build Number:</strong> #${BUILD_NUMBER}</li>
+                                            <li><strong>Image Docker:</strong> ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}</li>
+                                            <li><strong>Statut:</strong> <span style="color: #28a745; font-weight: bold;">SUCCESS ✅</span></li>
+                                        </ul>
 
-                                <h3>☸️ Déploiement Kubernetes:</h3>
-                                <ul>
-                                    <li><strong>Namespace:</strong> devops</li>
-                                    <li><strong>Pods en cours d'exécution:</strong> ${deploymentStatus}</li>
-                                    <li><strong>URL d'accès:</strong> <a href="http://${kubeIP}:30080" style="color: #007bff;">http://${kubeIP}:30080</a></li>
-                                </ul>
+                                        <h3>☸️ Déploiement Kubernetes:</h3>
+                                        <ul>
+                                            <li><strong>Namespace:</strong> devops</li>
+                                            <li><strong>Pods en cours d'exécution:</strong> ${deploymentStatus}</li>
+                                            <li><strong>URL d'accès:</strong> <a href="http://${kubeIP}:30080">http://${kubeIP}:30080</a></li>
+                                        </ul>
 
-                                <h3>🔍 Analyse SonarQube:</h3>
-                                <p><a href="${SONAR_HOST_URL}/dashboard?id=timesheet-devops-mariem" style="color: #007bff;">📊 Voir les résultats SonarQube</a></p>
+                                        <h3>🔍 Analyse SonarQube:</h3>
+                                        <p><a href="${SONAR_HOST_URL}/dashboard?id=timesheet-devops-mariem">📊 Voir les résultats SonarQube</a></p>
 
-                                <h3>🐳 Image Docker Hub:</h3>
-                                <p><a href="https://hub.docker.com/r/${DOCKER_IMAGE_NAME}" style="color: #007bff;">🔗 Voir sur Docker Hub</a></p>
+                                        <h3>🐳 Image Docker Hub:</h3>
+                                        <p><a href="https://hub.docker.com/r/${DOCKER_IMAGE_NAME}">🔗 Voir sur Docker Hub</a></p>
 
-                                <hr style="border: 1px solid #e9ecef;">
-                                <p style="color: #6c757d; font-size: 12px;">
-                                    ⏰ Build terminé à: ${new Date()}<br>
-                                    📝 <a href="${BUILD_URL}">Voir les logs complets</a>
-                                </p>
-                            </body>
-                            </html>
-                        """,
-                        to: 'pgtxsi@gmail.com',
-                        mimeType: 'text/html'
-                    )
-                    echo '✅ Email de notification envoyé avec succès!'
+                                        <hr style="border: 1px solid #e9ecef;">
+                                        <p style="color: #6c757d; font-size: 12px;">
+                                            ⏰ Build terminé à: ${new Date()}<br>
+                                            📝 <a href="${BUILD_URL}">Voir les logs complets</a>
+                                        </p>
+                                    </body>
+                                    </html>
+                                """,
+                                to: 'pgtxsi@gmail.com',
+                                mimeType: 'text/html'
+                            )
+                        }
+                        echo '✅ Email de notification envoyé avec succès!'
+                    } catch (Exception e) {
+                        echo "⚠️ Impossible d'envoyer l'email: ${e.message}"
+                        echo "Le déploiement a réussi malgré l'échec de l'email"
+                    }
                 }
             }
         }
@@ -214,33 +237,41 @@ pipeline {
         }
         failure {
             echo '❌ Le pipeline a échoué. Vérifiez les logs ci-dessus.'
-            emailext(
-                subject: "❌ Échec du Déploiement - Build #${BUILD_NUMBER}",
-                body: """
-                    <html>
-                    <body style="font-family: Arial, sans-serif;">
-                        <h2 style="color: #dc3545;">❌ Échec du Déploiement!</h2>
+            script {
+                try {
+                    timeout(time: 2, unit: 'MINUTES') {
+                        emailext(
+                            subject: "❌ Échec du Déploiement - Build #${BUILD_NUMBER}",
+                            body: """
+                                <html>
+                                <body style="font-family: Arial, sans-serif;">
+                                    <h2 style="color: #dc3545;">❌ Échec du Déploiement!</h2>
 
-                        <h3>Détails du Build:</h3>
-                        <ul>
-                            <li><strong>Projet:</strong> ${JOB_NAME}</li>
-                            <li><strong>Build Number:</strong> #${BUILD_NUMBER}</li>
-                            <li><strong>Statut:</strong> <span style="color: #dc3545;">FAILURE</span></li>
-                        </ul>
+                                    <h3>Détails du Build:</h3>
+                                    <ul>
+                                        <li><strong>Projet:</strong> ${JOB_NAME}</li>
+                                        <li><strong>Build Number:</strong> #${BUILD_NUMBER}</li>
+                                        <li><strong>Statut:</strong> <span style="color: #dc3545;">FAILURE</span></li>
+                                    </ul>
 
-                        <p><strong>Action requise:</strong> Veuillez vérifier les logs pour identifier le problème.</p>
+                                    <p><strong>Action requise:</strong> Veuillez vérifier les logs pour identifier le problème.</p>
 
-                        <hr>
-                        <p style="color: #6c757d; font-size: 12px;">
-                            Build échoué à: ${new Date()}<br>
-                            <a href="${BUILD_URL}console">Voir les logs complets</a>
-                        </p>
-                    </body>
-                    </html>
-                """,
-                to: 'pgtxsi@gmail.com',
-                mimeType: 'text/html'
-            )
+                                    <hr>
+                                    <p style="color: #6c757d; font-size: 12px;">
+                                        Build échoué à: ${new Date()}<br>
+                                        <a href="${BUILD_URL}console">Voir les logs complets</a>
+                                    </p>
+                                </body>
+                                </html>
+                            """,
+                            to: 'pgtxsi@gmail.com',
+                            mimeType: 'text/html'
+                        )
+                    }
+                } catch (Exception e) {
+                    echo "⚠️ Impossible d'envoyer l'email d'échec: ${e.message}"
+                }
+            }
         }
         always {
             echo 'Nettoyage des images Docker locales...'
